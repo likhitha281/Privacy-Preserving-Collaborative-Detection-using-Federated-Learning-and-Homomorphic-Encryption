@@ -1,0 +1,6 @@
+# Data portion only. Pratham: merge these into the root requirements.txt.
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14
+scikit-learn>=1.3   # only used by the unit tests
+pytest>=7

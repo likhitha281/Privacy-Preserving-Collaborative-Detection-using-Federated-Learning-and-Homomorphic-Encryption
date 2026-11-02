@@ -1,0 +1,6 @@
+# raw Kaggle files and generated datasets stay out of Git (hundreds of MB; rebuilt from the seed)
+raw/
+processed/
+*.parquet
+__pycache__/
+.pytest_cache/
