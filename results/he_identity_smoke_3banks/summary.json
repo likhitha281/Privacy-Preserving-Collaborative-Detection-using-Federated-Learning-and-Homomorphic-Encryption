@@ -1,0 +1,71 @@
+{
+  "status": "PASS",
+  "check_type": "one_round_trained_weight_aggregation_not_flower",
+  "data_kind": "ieee",
+  "fraud_type": "identity_fraud",
+  "rounds": 1,
+  "local_epochs": 1,
+  "banks": 3,
+  "input_dim": 109,
+  "n_parameters": 24449,
+  "chunks_per_client": 6,
+  "used_sample_counts": {
+    "0": 2000,
+    "1": 2000,
+    "2": 2000
+  },
+  "max_train_per_bank": 2000,
+  "max_val_per_bank": 1000,
+  "model_and_subsample_seed": 42,
+  "data_config": {
+    "n_banks": 3,
+    "alpha": 0.5,
+    "seed": 42,
+    "partition": "label_skew"
+  },
+  "max_abs_weight_error": 1.9868214962137642e-08,
+  "weight_error_tolerance": 1e-05,
+  "max_abs_probability_difference": 1.7881393432617188e-07,
+  "setup_s": 0.03998779199901037,
+  "aggregate_s": 0.01265504201001022,
+  "encrypt_total_s": 0.05495933399652131,
+  "decrypt_total_s": 0.022719166008755565,
+  "ciphertext_upload_bytes": 5965511,
+  "aggregate_ciphertext_bytes": 1988894,
+  "total_broadcast_ciphertext_bytes": 5966682,
+  "model_spec_fingerprint": "a3133843a7b4eada79d19d4b30a8589f7567bed2e99bdf308035ba57d9fd2eb4",
+  "data_manifest_rows": 590540,
+  "data_manifest_split_rows": {
+    "train": 413378,
+    "val": 59054,
+    "test": 118108
+  },
+  "source_commit": "8c1c56aff0b67cb59ba06fd1607b77e0094c6cdd",
+  "source_sha256": {
+    "data/loader.py": "4f7e7258985414085ae04f0584c489ccff0b5e7b005ba508410fae73c4d40192",
+    "models/identity.py": "b1c0931a555385cec31d630ca5528062fff32c9d3d8bab9e2cd3a5036c89c876",
+    "he/ckks.py": "ed5f8e87a1dbdf128054249e2b507f8c18be910915a31dd99de39c689ff63ea9",
+    "he/keys.py": "d8e8fb02888ae0e34e1bb91a516c208aac00e1fbf666ddea1cd9e21d28543954",
+    "he/__init__.py": "cd762a08acab3ec8d5356b983ac7b78ca14ce3816c37bc162011ee2ba66319c5"
+  },
+  "python": "3.13.5",
+  "platform": "macOS-15.8.1-arm64-arm-64bit-Mach-O",
+  "cpu_threads": 4,
+  "package_versions": {
+    "numpy": "2.2.6",
+    "torch": "2.15.0",
+    "tenseal": "0.3.18",
+    "pandas": "3.1.0",
+    "pyarrow": "26.0.1",
+    "scikit-learn": "1.9.1"
+  },
+  "timestamp_utc": "2026-11-03T21:16:18.938062+00:00",
+  "notes": [
+    "All roles execute sequentially in one process; this is not process isolation.",
+    "Sample weights use training rows actually used, including subset limits.",
+    "Metrics use validation data with fixed threshold 0.5; test set is not evaluated.",
+    "The two averages use identical trained updates, not separately retrained FL trajectories.",
+    "Training and network latency are excluded from reported crypto times.",
+    "Crypto setup/contexts use the original HE module; no DP is applied."
+  ]
+}

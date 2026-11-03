@@ -1,0 +1,19 @@
+{
+  "timestamp_utc": "2026-10-27T20:43:48.436793+00:00",
+  "python": "3.13.5",
+  "platform": "macOS-15.8.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "numpy": "2.2.6",
+  "tenseal": "0.3.18",
+  "threads_per_context": 1,
+  "poly_modulus_degree": 8192,
+  "coeff_mod_bit_sizes": [
+    60,
+    40,
+    40,
+    60
+  ],
+  "global_scale": 1099511627776,
+  "public_context_transfer": "once per experiment; excluded from round payload",
+  "benchmark_type": "sequential synthetic crypto only; excludes training and network transport"
+}
