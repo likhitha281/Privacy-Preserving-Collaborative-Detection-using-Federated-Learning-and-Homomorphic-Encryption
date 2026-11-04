@@ -1,4 +1,5 @@
-
+import csv
+from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
@@ -107,6 +108,35 @@ def main():
             f"{result['roc_auc']:<10.4f} "
             f"{result['pr_auc']:<10.4f}"
         )
+
+
+
+def main():
+    all_results = [train_local_bank(bank_id) for bank_id in range(N_BANKS)]
+
+    print("\nLocal baseline summary")
+    print(f"{'Bank':<6} {'Threshold':<11} {'Default F1':<12} {'Tuned F1':<10} {'ROC-AUC':<10} {'PR-AUC':<10}")
+
+    for result in all_results:
+        print(
+            f"{result['bank_id']:<6} "
+            f"{result['best_threshold']:<11.4f} "
+            f"{result['default_f1']:<12.4f} "
+            f"{result['tuned_f1']:<10.4f} "
+            f"{result['roc_auc']:<10.4f} "
+            f"{result['pr_auc']:<10.4f}"
+        )
+
+    output_dir = Path(__file__).resolve().parent.parent / "results"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = output_dir / "credit_card_local_baseline.csv"
+
+    with output_file.open("w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=all_results[0].keys())
+        writer.writeheader()
+        writer.writerows(all_results)
+
+    print(f"\nResults saved to: {output_file}")
 
 
 if __name__ == "__main__":
