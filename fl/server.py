@@ -4,7 +4,7 @@ from fl.client import create_client
 from fl.strategy import FraudFedAvg
 
 
-NUM_CLIENTS = 3
+NUM_CLIENTS = 5
 NUM_ROUNDS = 3
 
 

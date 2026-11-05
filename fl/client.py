@@ -1,101 +1,201 @@
 import flwr as fl
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-from torch.utils.data import DataLoader, TensorDataset
+
+from data.loader import load_client_data, input_dim, get_pos_weight
+
+from models.credit_card import build_model as build_credit_card_model
+from models.account_takeover import build_model as build_account_takeover_model
+from models.identity import build_model as build_identity_model
 
 
-class SimpleFraudModel(nn.Module):
-    def __init__(self, input_dim=10):
-        super().__init__()
+# ---------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------
 
-        self.network = nn.Sequential(
-            nn.Linear(input_dim, 16),
-            nn.ReLU(),
-            nn.Linear(16, 8),
-            nn.ReLU(),
-            nn.Linear(8, 1)
-        )
-
-    def forward(self, x):
-        return self.network(x).squeeze(1)
+FRAUD_TYPE = "credit_card"
+NUM_BANKS = 5
+LOCAL_EPOCHS = 1
 
 
-def create_dummy_data(bank_id, num_samples=200):
-    # Different seed gives each simulated bank different private data
-    torch.manual_seed(42 + bank_id)
+# ---------------------------------------------------------
+# Model selection
+# ---------------------------------------------------------
 
-    # 10 input features for each transaction
-    X = torch.randn(num_samples, 10)
+def build_fraud_model(fraud_type):
+    """
+    Build the correct fraud detection model
+    for the selected fraud type.
+    """
 
-    # Create binary fraud labels: 0 = normal, 1 = fraud
-    y = (X.sum(dim=1) > 0).float()
-
-    # 80% training, 20% validation
-    split = int(0.8 * num_samples)
-
-    train_dataset = TensorDataset(
-        X[:split],
-        y[:split]
+    dim = input_dim(
+        fraud_type,
+        n_banks=NUM_BANKS
     )
 
-    val_dataset = TensorDataset(
-        X[split:],
-        y[split:]
+    if fraud_type == "credit_card":
+        return build_credit_card_model(dim)
+
+    if fraud_type == "account_takeover":
+        return build_account_takeover_model(dim)
+
+    if fraud_type == "identity_fraud":
+        return build_identity_model(dim)
+
+    raise ValueError(
+        f"Unknown fraud type: {fraud_type}"
     )
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=32,
-        shuffle=True
-    )
 
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=32,
-        shuffle=False
-    )
-
-    return train_loader, val_loader
-
+# ---------------------------------------------------------
+# Model weight exchange
+# ---------------------------------------------------------
 
 def get_weights(model):
+    """
+    Convert PyTorch model parameters into NumPy arrays
+    so Flower can send them to the server.
+    """
+
     return [
-        value.cpu().numpy()
-        for _, value in model.state_dict().items()
+        parameter.detach().cpu().numpy().copy()
+        for parameter in model.parameters()
     ]
+
+
 def set_weights(model, weights):
-    keys = model.state_dict().keys()
+    """
+    Load global model parameters received from Flower
+    into the local PyTorch model.
+    """
 
-    state_dict = {
-        key: torch.tensor(value)
-        for key, value in zip(keys, weights)
-    }
+    parameters = list(model.parameters())
 
-    model.load_state_dict(state_dict, strict=True)
+    if len(parameters) != len(weights):
+        raise ValueError(
+            "Number of received weight arrays "
+            "does not match model parameters."
+        )
+
+    with torch.no_grad():
+
+        for parameter, weight in zip(
+            parameters,
+            weights
+        ):
+
+            weight = np.asarray(
+                weight,
+                dtype=np.float32
+            )
+
+            if tuple(weight.shape) != tuple(parameter.shape):
+                raise ValueError(
+                    "Weight shape does not match "
+                    "model parameter shape."
+                )
+
+            parameter.copy_(
+                torch.as_tensor(
+                    weight,
+                    dtype=parameter.dtype,
+                    device=parameter.device
+                )
+            )
 
 
-def train_model(model, train_loader, epochs=1):
-    criterion = nn.BCEWithLogitsLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+# ---------------------------------------------------------
+# Local training
+# ---------------------------------------------------------
+
+def train_model(
+    model,
+    X_train,
+    y_train,
+    pos_weight,
+    epochs=1
+):
+    """
+    Train one client's model locally using only
+    that simulated bank's private training data.
+    """
 
     model.train()
 
+    # copy=True avoids PyTorch warnings caused by
+    # read-only NumPy arrays loaded from parquet.
+    X_tensor = torch.from_numpy(
+        np.array(
+            X_train,
+            dtype=np.float32,
+            copy=True
+        )
+    )
+
+    y_tensor = torch.from_numpy(
+        np.array(
+            y_train,
+            dtype=np.float32,
+            copy=True
+        )
+    )
+
+    criterion = nn.BCEWithLogitsLoss(
+        pos_weight=torch.tensor(
+            [pos_weight],
+            dtype=torch.float32
+        )
+    )
+
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=0.001
+    )
+
+    batch_size = 512
+
     for epoch in range(epochs):
+
+        permutation = torch.randperm(
+            len(X_tensor)
+        )
+
         total_loss = 0.0
 
-        for X, y in train_loader:
+        for start in range(
+            0,
+            len(X_tensor),
+            batch_size
+        ):
+
+            indices = permutation[
+                start:start + batch_size
+            ]
+
+            X_batch = X_tensor[indices]
+            y_batch = y_tensor[indices]
+
             optimizer.zero_grad()
 
-            outputs = model(X)
-            loss = criterion(outputs, y)
+            outputs = model(X_batch)
+
+            loss = criterion(
+                outputs,
+                y_batch
+            )
 
             loss.backward()
+
             optimizer.step()
 
-            total_loss += loss.item()
+            total_loss += (
+                loss.item() * len(indices)
+            )
 
-        average_loss = total_loss / len(train_loader)
+        average_loss = (
+            total_loss / len(X_tensor)
+        )
 
         print(
             f"Local epoch {epoch + 1}: "
@@ -103,98 +203,279 @@ def train_model(model, train_loader, epochs=1):
         )
 
 
-def evaluate_model(model, val_loader):
-    criterion = nn.BCEWithLogitsLoss()
+# ---------------------------------------------------------
+# Local evaluation
+# ---------------------------------------------------------
+
+def evaluate_model(
+    model,
+    X_val,
+    y_val
+):
+    """
+    Evaluate the global model on one bank's
+    private validation partition.
+    """
 
     model.eval()
+
+    # copy=True avoids read-only NumPy array warnings.
+    X_tensor = torch.from_numpy(
+        np.array(
+            X_val,
+            dtype=np.float32,
+            copy=True
+        )
+    )
+
+    y_tensor = torch.from_numpy(
+        np.array(
+            y_val,
+            dtype=np.float32,
+            copy=True
+        )
+    )
+
+    criterion = nn.BCEWithLogitsLoss()
+
+    batch_size = 2048
 
     total_loss = 0.0
     correct = 0
     total = 0
 
     with torch.no_grad():
-        for X, y in val_loader:
-            outputs = model(X)
 
-            loss = criterion(outputs, y)
-            total_loss += loss.item()
+        for start in range(
+            0,
+            len(X_tensor),
+            batch_size
+        ):
 
-            probabilities = torch.sigmoid(outputs)
-            predictions = (probabilities >= 0.5).float()
+            X_batch = X_tensor[
+                start:start + batch_size
+            ]
 
-            correct += (predictions == y).sum().item()
-            total += y.size(0)
+            y_batch = y_tensor[
+                start:start + batch_size
+            ]
 
-    average_loss = total_loss / len(val_loader)
+            outputs = model(X_batch)
+
+            loss = criterion(
+                outputs,
+                y_batch
+            )
+
+            probabilities = torch.sigmoid(
+                outputs
+            )
+
+            predictions = (
+                probabilities >= 0.5
+            ).float()
+
+            total_loss += (
+                loss.item() * len(y_batch)
+            )
+
+            correct += (
+                predictions == y_batch
+            ).sum().item()
+
+            total += len(y_batch)
+
+    average_loss = total_loss / total
+
     accuracy = correct / total
 
     return average_loss, accuracy
 
 
+# ---------------------------------------------------------
+# Flower client
+# ---------------------------------------------------------
+
 class FraudClient(fl.client.NumPyClient):
-    def __init__(self, bank_id, model, train_loader, val_loader):
+    """
+    Flower client representing one simulated bank.
+    """
+
+    def __init__(
+        self,
+        bank_id,
+        fraud_type,
+        model,
+        X_train,
+        y_train,
+        X_val,
+        y_val,
+        pos_weight
+    ):
+
         self.bank_id = bank_id
+        self.fraud_type = fraud_type
+
         self.model = model
-        self.train_loader = train_loader
-        self.val_loader = val_loader
+
+        self.X_train = X_train
+        self.y_train = y_train
+
+        self.X_val = X_val
+        self.y_val = y_val
+
+        self.pos_weight = pos_weight
+
 
     def get_parameters(self, config):
-        print(f"Bank {self.bank_id}: sending model parameters")
-        return get_weights(self.model)
+        """
+        Return this client's current model parameters.
+        """
 
-    def fit(self, parameters, config):
-        print(f"Bank {self.bank_id}: starting local training")
+        print(
+            f"Bank {self.bank_id}: "
+            "sending model parameters"
+        )
 
-        # Receive the current global model from the server
-        set_weights(self.model, parameters)
+        return get_weights(
+            self.model
+        )
 
-        # Train using this bank's private data
+
+    def fit(
+        self,
+        parameters,
+        config
+    ):
+        """
+        Receive the global model, train locally,
+        and return the updated model parameters.
+        """
+
+        print(
+            f"Bank {self.bank_id}: "
+            "starting local training"
+        )
+
+        # Load the latest global model.
+        set_weights(
+            self.model,
+            parameters
+        )
+
+        # Train only on this bank's private data.
         train_model(
             self.model,
-            self.train_loader,
-            epochs=1
-        )
-
-        print(f"Bank {self.bank_id}: local training complete")
-
-        # Return updated parameters and number of training samples
-        return (
-            get_weights(self.model),
-            len(self.train_loader.dataset),
-            {"bank_id": self.bank_id}
-        )
-
-    def evaluate(self, parameters, config):
-        # Load the latest global model
-        set_weights(self.model, parameters)
-
-        # Evaluate using this bank's private validation data
-        loss, accuracy = evaluate_model(
-            self.model,
-            self.val_loader
+            self.X_train,
+            self.y_train,
+            self.pos_weight,
+            epochs=LOCAL_EPOCHS
         )
 
         print(
             f"Bank {self.bank_id}: "
-            f"validation accuracy = {accuracy:.4f}"
+            "local training complete"
+        )
+
+        # len(X_train) is used by Flower for
+        # sample-count-weighted FedAvg.
+        return (
+            get_weights(self.model),
+            len(self.X_train),
+            {
+                "bank_id": self.bank_id
+            }
+        )
+
+
+    def evaluate(
+        self,
+        parameters,
+        config
+    ):
+        """
+        Evaluate the latest global model using
+        this bank's private validation data.
+        """
+
+        set_weights(
+            self.model,
+            parameters
+        )
+
+        loss, accuracy = evaluate_model(
+            self.model,
+            self.X_val,
+            self.y_val
+        )
+
+        print(
+            f"Bank {self.bank_id}: "
+            f"validation accuracy = "
+            f"{accuracy:.4f}"
         )
 
         return (
             float(loss),
-            len(self.val_loader.dataset),
-            {"accuracy": float(accuracy)}
+            len(self.X_val),
+            {
+                "accuracy":
+                    float(accuracy)
+            }
         )
 
-def create_client(bank_id):
-    model = SimpleFraudModel(input_dim=10)
 
-    train_loader, val_loader = create_dummy_data(
-        bank_id=bank_id
+# ---------------------------------------------------------
+# Flower client factory
+# ---------------------------------------------------------
+
+def create_client(
+    bank_id,
+    fraud_type=FRAUD_TYPE
+):
+    """
+    Create one Flower client using the real
+    IEEE-CIS partition for a simulated bank.
+    """
+
+    print(
+        f"Loading real data for "
+        f"Bank {bank_id} "
+        f"({fraud_type})"
+    )
+
+    X_train, y_train, X_val, y_val = (
+        load_client_data(
+            bank_id=bank_id,
+            fraud_type=fraud_type,
+            n_banks=NUM_BANKS
+        )
+    )
+
+    model = build_fraud_model(
+        fraud_type
+    )
+
+    pos_weight = get_pos_weight(
+        bank_id=bank_id,
+        fraud_type=fraud_type,
+        n_banks=NUM_BANKS
+    )
+
+    print(
+        f"Bank {bank_id}: "
+        f"{len(X_train)} training samples, "
+        f"{len(X_val)} validation samples, "
+        f"{X_train.shape[1]} features"
     )
 
     return FraudClient(
         bank_id=bank_id,
+        fraud_type=fraud_type,
         model=model,
-        train_loader=train_loader,
-        val_loader=val_loader
+        X_train=X_train,
+        y_train=y_train,
+        X_val=X_val,
+        y_val=y_val,
+        pos_weight=pos_weight
     )
