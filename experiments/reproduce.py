@@ -24,7 +24,8 @@ grid was running on the same machine, so treat them as upper-end figures:
   Without a competing job, earlier runs on the same machine took ~7.5 s per credit_card round, i.e.
   roughly 4x faster than these figures.
   summarize + plots: under a minute.
-  --quick: about 15 minutes in total (grid ~3 min, label_flip ~7 min, gradient_leakage ~2 min).
+  --quick: measured 13m46s wall (826 s) on 2026-11-10, also under load: grid 4m33s, attacks 8m54s,
+  summarize <1 s, plots 8 s (python -m experiments.reproduce --quick --results-dir /tmp/repro_quick).
 """
 from __future__ import annotations
 

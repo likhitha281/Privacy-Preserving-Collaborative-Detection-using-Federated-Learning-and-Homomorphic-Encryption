@@ -118,12 +118,13 @@ builds the processed federation automatically (about a minute per partition sett
 
 ```bash
 python -m experiments.reproduce            # full: grid (15 rounds, seeds 42 43 44), attacks, summaries, figures
-python -m experiments.reproduce --quick    # small profile, about 15 minutes -> results/quick/
+python -m experiments.reproduce --quick    # small profile -> results/quick/ (13m46s measured, see below)
 python -m experiments.reproduce --dry-run  # list the stages and what is already done, run nothing
 ```
 
 `reproduce` runs `experiments.run_all`, then the two attack scripts, then `experiments.summarize` and
-`experiments.plots.make_plots`, printing the time for each stage. Finished grid runs (one CSV per run) are
+`experiments.plots.make_plots`, printing the time for each stage. A measured `--quick` run (`--results-dir /tmp/repro_quick`) took 13m46s: grid 4m33s, attacks 8m54s,
+summaries and plots under 10 s, on a CPU-only WSL2 machine that was also running another experiment grid. Finished grid runs (one CSV per run) are
 skipped, so an interrupted run can be restarted with the same command. The expected runtime is in the
 `experiments/reproduce.py` docstring. Individual pieces:
 
