@@ -6,3 +6,8 @@ data/raw/
 data/processed/
 private_keys/
 .env
+data/raw/
+data/processed/
+results/quick/
+results/synthetic/
+results/attacks/quick/
