@@ -10,7 +10,7 @@ Runs every experiment in the project and turns the outputs into tables and figur
 | `summarize.py` | `python -m experiments.summarize --results-dir results`: `summary_main.csv`, `summary_cost.csv`, `summary_noniid.csv`. |
 | `attacks/` | label flipping and gradient leakage against an honest-but-curious server ([README](attacks/README.md)). |
 | `plots/make_plots.py` | `python -m experiments.plots.make_plots --results results --out results/figures`: PNG and PDF figures plus `index.md`; works on partial results. |
-| `reproduce.py` | `python -m experiments.reproduce [--quick] [--dry-run]`: grid, attacks, summaries and plots in order, with per-stage timing. |
+| `reproduce.py` | `python -m experiments.reproduce [--quick] [--dry-run] [--results-dir DIR] [--only STAGE ...] [--force-attacks]`: grid, attacks, summaries and plots in order, with per-stage timing. The full grid profile is 15 rounds, seeds 42 43 44 (`run_all`'s own default is 10 rounds, seed 42). |
 | `synthetic.py` | generated IEEE-CIS-shaped data for tests and `--synthetic` runs (never for reported results). |
 
 Every run is described by one `common.config.ExperimentConfig`. Federated runs call `fl.run_federated`.

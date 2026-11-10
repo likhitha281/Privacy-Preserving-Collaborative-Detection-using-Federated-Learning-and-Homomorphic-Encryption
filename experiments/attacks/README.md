@@ -32,7 +32,9 @@ run where bank 0 flips a random f of its training labels.
 * Detection demo (`fedavg` only): from the observer data the server computes each client's update
   (upload - broadcast), the coordinate-wise median update, each client's L2 distance from it, and
   `score = distance / median distance`; a client is flagged when `score > 2.0` (fixed beforehand, not tuned).
-  The summary reports how often bank 0 was flagged and the false-flag rate of honest banks.
+  The summary reports how often bank 0 was flagged and the false-flag rate of honest banks. In the committed
+  run (seed 42) the screen flagged nobody: bank 0's score stayed at or below 1.70 in every round and flip
+  fraction, so it did not detect the attack even in plaintext.
 * In `fedavg_he` the same screen cannot be computed: the server only has ciphertext. Those rows have
   `screen_available = False` and no screen values, and the summary has an explicit `limitation` row. No number is
   produced for it.
@@ -54,7 +56,9 @@ server is assumed to know the client's `pos_weight` (attacker-favourable).
 * Controlled setting: each bank trains on B real rows with batch size B for one epoch, i.e. exactly one local
   step, B in {1, 4, 16}. This is where gradient inversion is known to work.
 * Realistic setting: bank 0's full partition, `local_epochs` epochs at batch size 512 (hundreds of Adam steps).
-  16 rows are reconstructed and each is matched to its closest real row; expected to fail.
+  16 rows are reconstructed and each is matched to its closest real row; expected to fail. In the committed
+  single trial (816 local steps) the plaintext reconstruction scored r = 0.577 against 0.766 for the mean-row
+  baseline, i.e. worse than the baseline.
 * Metrics: per-row NMSE (squared error per feature divided by the pooled training variance, floored at 0.01) and
   Pearson r between matched reconstructed and true feature vectors (Hungarian matching), against a baseline
   that guesses the population mean row with the same matching.
@@ -84,14 +88,19 @@ python -m experiments.attacks.gradient_leakage          # full: 5 trials per bat
 python -m experiments.run_all --attacks                 # main grid, then both attacks -> results/attacks/
 ```
 
+The committed `results/attacks/` files come from the two full commands above (their defaults: seed 42, 10
+rounds). `python -m experiments.reproduce` runs the attacks with 15 rounds and seeds 42 43 44, but skips each
+attack whose output CSV exists unless `--force-attacks` is passed.
+
 Options: `--seeds`, `--modes`, `--results-dir`; label_flip also `--n-clients --fracs --rounds --local-epochs`;
 gradient_leakage also `--trials --iters --batch-sizes --local-epochs --no-realistic`.
 
 ## Limitations
 
 * Encryption stops the server from inspecting updates, so server-side poisoning defences (distance/median
-  screens, robust aggregation, norm clipping) are not available in `fedavg_he`: the encrypted run is exactly as
-  vulnerable to label flipping as plaintext FedAvg, and it cannot detect it.
+  screens, robust aggregation, norm clipping) are not available in `fedavg_he`. In the committed run the
+  encrypted federation lost about as much as plaintext FedAvg under label flipping (final-round PR-AUC drops
+  differ by at most 0.017 between modes, seed 42 only), and the server cannot screen for it.
 * All clients share one CKKS secret key (one key pair from trusted setup). A bank, or anyone who obtains a
   bank's key, can decrypt every other bank's upload if it sees them; the protection is only against the server.
   The decrypted global model is also visible to every bank.
