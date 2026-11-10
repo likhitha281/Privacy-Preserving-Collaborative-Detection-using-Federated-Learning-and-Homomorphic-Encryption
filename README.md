@@ -4,7 +4,7 @@ Banks see only their own customers, so each one has few examples of fraud, and p
 pooling transaction data. This project tests whether simulated banks can train a shared fraud model with
 **federated learning** (FedAvg: each bank trains locally and sends only model weights), and whether adding
 **homomorphic encryption** (CKKS) stops the aggregation server from seeing any bank's weights while giving the
-same model. Three setups are compared on the same data and test set:
+same model up to CKKS approximation error. Three setups are compared on the same data and test set:
 
 | mode | what is shared | who can read a bank's update |
 |---|---|---|
@@ -70,11 +70,53 @@ In `fedavg` the same flow carries plaintext float32 weights, and the server does
 5. **Evaluate.** The server cannot evaluate an encrypted model. A **trusted evaluator in the harness** does it
    with the **same shared secret context the banks use** (not a separate key): it decrypts the global model,
    chooses the threshold on pooled validation predictions and scores the test set. In a deployment there would be
-   no extra key holder: one of the banks would run this evaluation. It also records `max_weight_err`, the gap between the decrypted model and the
-   plaintext weighted average of the same updates (about 1e-8).
+   no extra key holder: one of the banks would run this evaluation. It also records `max_weight_err`, the gap
+   between the decrypted model and the plaintext weighted average of the same updates (3.7e-8 to 1.2e-7 per
+   configuration in `results/summary_cost.csv`).
 
 The implementation drives Flower's own strategy, client manager and `NumPyClient` serialisation in one process
 (no Ray), so parameters pass through the same `Parameters` encoding as over a network.
+
+## Results at a glance
+
+Grid: 15 rounds, 2 local epochs, seeds 42, 43 and 44, alpha 0.5 unless stated. Final-round test PR-AUC, mean ±
+std over the 3 seeds (`results/summary_main.csv`):
+
+| fraud type | banks | local only | FedAvg | FedAvg + CKKS |
+|---|---|---|---|---|
+| account_takeover | 3 | 0.060 ± 0.004 | 0.070 ± 0.002 | 0.069 ± 0.001 |
+| account_takeover | 5 | 0.057 ± 0.003 | 0.068 ± 0.002 | 0.069 ± 0.002 |
+| credit_card | 3 | 0.347 ± 0.014 | 0.419 ± 0.004 | 0.419 ± 0.010 |
+| credit_card | 5 | 0.332 ± 0.005 | 0.426 ± 0.004 | 0.430 ± 0.001 |
+| identity_fraud | 3 | 0.155 ± 0.003 | 0.188 ± 0.003 | 0.186 ± 0.005 |
+| identity_fraud | 5 | 0.150 ± 0.003 | 0.189 ± 0.005 | 0.188 ± 0.005 |
+
+* FedAvg has a higher mean PR-AUC than local-only training in all 6 settings. FedAvg + CKKS and FedAvg differ by
+  at most 0.0033 PR-AUC in mean, the same order as the seed-to-seed std (0.001 to 0.010); round by round the gap
+  is at most 0.0030 (3 banks) and 0.0042 (5 banks).
+* Account takeover stays weak in every mode: PR-AUC 0.057 to 0.070 and ROC-AUC 0.60 to 0.64. Federation helps
+  it slightly but does not make it a good detector.
+* Cost (`results/summary_cost.csv`): encrypt + decrypt + aggregate takes 0.065 to 0.135 s per round, 0.6 to 1.0%
+  of a FedAvg round. Ciphertext uploads are 20 to 22 times the plaintext size (about 1.0 MB for
+  account_takeover and 2.0 MB for the other views, against 47 to 98 KB). The whole-round wall-time ratio
+  (HE / plaintext) ranged from 0.97 to 1.35, so round-time differences are dominated by run-to-run variation,
+  not by the crypto.
+* Non-IID (credit_card, alpha 0.1, 0.5, 5.0; `results/summary_noniid.csv`): local only 0.317 to 0.356, FedAvg
+  0.412 to 0.426, FedAvg + CKKS 0.415 to 0.430 PR-AUC.
+* Label flipping (credit_card, seed 42 only, 10 rounds; `results/attacks/label_flip_summary.csv`): with 3 banks
+  and bank 0 flipping 25% of its labels, F1 at 0.5 drops 0.212 but tuned F1 drops only 0.004 and PR-AUC 0.031.
+  Flipping all of them drops PR-AUC by 0.388 (3 banks) and 0.153 to 0.158 (5 banks). Both modes are hurt by
+  similar amounts. The plaintext median-distance screen never flagged bank 0 (highest score 1.70 against the
+  2.0 threshold), and in `fedavg_he` it cannot be computed at all.
+* Gradient inversion (credit_card, seed 42; 5 trials per batch size in the one-step setting, one trial in the
+  realistic setting; `results/attacks/gradient_leakage.csv`): on plaintext single-step updates the
+  reconstruction correlation is r = 0.787 at batch size 1 and 0.582 at batch size 16, against 0.468 and 0.494
+  for guessing the mean row. On ciphertext it is 0.28 to 0.36, below the baseline. In the realistic setting
+  (full partition, 816 local steps) it is 0.577 on plaintext against a baseline of 0.766, so the attack does
+  worse than the baseline there.
+
+All figures, with the files each one uses and a takeaway computed from them, are in
+[results/figures/index.md](results/figures/index.md).
 
 ## Repository layout
 
@@ -122,11 +164,19 @@ python -m experiments.reproduce --quick    # small profile -> results/quick/ (13
 python -m experiments.reproduce --dry-run  # list the stages and what is already done, run nothing
 ```
 
+Other options: `--results-dir DIR` (default `results`, or `results/quick` with `--quick`), `--only STAGE ...`
+(any of `grid attacks summarize plots`) and `--force-attacks` (rerun the attacks even if their CSVs exist).
+
 `reproduce` runs `experiments.run_all`, then the two attack scripts, then `experiments.summarize` and
 `experiments.plots.make_plots`, printing the time for each stage. A measured `--quick` run (`--results-dir /tmp/repro_quick`) took 13m46s: grid 4m33s, attacks 8m54s,
 summaries and plots under 10 s, on a CPU-only WSL2 machine that was also running another experiment grid. Finished grid runs (one CSV per run) are
 skipped, so an interrupted run can be restarted with the same command. The expected runtime is in the
-`experiments/reproduce.py` docstring. Individual pieces:
+`experiments/reproduce.py` docstring.
+
+The committed attack outputs in `results/attacks/` came from the attack scripts' own defaults (seed 42, 10 rounds
+for label flipping). The full `reproduce` profile would run the attacks with 15 rounds and seeds 42, 43 and 44
+instead, but because those CSVs already exist it skips the attack stage unless `--force-attacks` is given.
+Individual pieces:
 
 ```bash
 python -m experiments.run_all [--quick] [--dry-run] [--attacks]   # main grid (+ optional attacks)
