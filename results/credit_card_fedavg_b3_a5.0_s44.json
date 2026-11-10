@@ -1,0 +1,13 @@
+{
+  "mode": "fedavg",
+  "fraud_type": "credit_card",
+  "n_clients": 3,
+  "alpha": 5.0,
+  "rounds": 15,
+  "local_epochs": 2,
+  "seed": 44,
+  "lr": 0.001,
+  "batch_size": 512,
+  "results_dir": "results",
+  "partition": "label_skew"
+}
