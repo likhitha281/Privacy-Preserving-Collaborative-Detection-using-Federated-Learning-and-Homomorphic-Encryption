@@ -10,7 +10,7 @@ same model. Three setups are compared on the same data and test set:
 |---|---|---|
 | `local` | nothing: each bank trains alone | nobody |
 | `fedavg` | plaintext model weights | the aggregation server |
-| `fedavg_he` | CKKS-encrypted weights; the server only adds ciphertexts | nobody but the key holders (the banks) |
+| `fedavg_he` | CKKS-encrypted weights; the server only adds ciphertexts | only holders of the one shared secret key: the banks and the harness's evaluator |
 
 We report detection quality (PR-AUC, and F1 at 0.5 and at a validation-tuned threshold), the cost of encryption
 (time and bytes per round), a non-IID ablation and two attacks (label flipping by a bank, gradient inversion by
@@ -45,10 +45,10 @@ flowchart LR
   end
   K["Trusted setup<br/>(he/keys.py)<br/>one CKKS key pair"] -- secret context --> Banks
   K -- public context only --> S
-  K -- secret context --> E
+  K -- "same shared secret context" --> E
   Banks -- "Enc(n_i/N * w_i)<br/>uint8 ciphertext chunks" --> S["Aggregation server<br/>(fl/strategy.py)<br/>adds ciphertexts, holds no key"]
   S -- "Enc(sum_i n_i/N * w_i)" --> Banks
-  S -- encrypted global model --> E["Trusted evaluator<br/>(experiment harness)<br/>decrypts, scores test set"]
+  S -- encrypted global model --> E["Trusted evaluator<br/>(experiment harness,<br/>same secret context as the banks)<br/>decrypts, scores test set"]
   D["data/loader.py<br/>partitions + global test set"] --> Banks
   D --> E
 ```
@@ -67,9 +67,10 @@ In `fedavg` the same flow carries plaintext float32 weights, and the server does
 4. **Aggregate.** The server holds only the public context. It checks that every bank replied exactly once and
    **only adds** the ciphertexts. The sum is already the weighted average, because the banks pre-scaled their
    weights. A missing or duplicate bank aborts the round.
-5. **Evaluate.** The server cannot evaluate an encrypted model. A separate **trusted evaluator in the harness**
-   holds a decryption key: it decrypts the global model, chooses the threshold on pooled validation predictions
-   and scores the test set. It also records `max_weight_err`, the gap between the decrypted model and the
+5. **Evaluate.** The server cannot evaluate an encrypted model. A **trusted evaluator in the harness** does it
+   with the **same shared secret context the banks use** (not a separate key): it decrypts the global model,
+   chooses the threshold on pooled validation predictions and scores the test set. In a deployment there would be
+   no extra key holder: one of the banks would run this evaluation. It also records `max_weight_err`, the gap between the decrypted model and the
    plaintext weighted average of the same updates (about 1e-8).
 
 The implementation drives Flower's own strategy, client manager and `NumPyClient` serialisation in one process
@@ -158,7 +159,8 @@ Both run on generated IEEE-CIS-shaped data, so they do not need the Kaggle files
 * **In-process simulation.** All banks, the server and the evaluator run in one Python process, one after the
   other. There is no network, no separate processes and no real transport security, and the timings do not
   include network latency.
-* **One shared secret key.** All banks use the same CKKS key pair from a trusted setup. Encryption hides updates
+* **One shared secret key.** All banks, and the harness's evaluator, use the same CKKS secret context from a
+  trusted setup. Encryption hides updates
   from the server only: any bank (or anyone with a bank's key) could decrypt another bank's update if it
   intercepted it. Multi-key or threshold HE, or secure aggregation, would remove this.
 * **Honest-but-curious server only.** The server is assumed to follow the protocol. A malicious server
